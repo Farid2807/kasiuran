@@ -90,7 +90,6 @@
     let isAdmin = false;
     let isShowAll = false;
     
-    // Ambil bulan sekarang (2026-05)
     const today = new Date();
     const currentYearMonth = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0');
     document.getElementById('bulan').value = currentYearMonth;
@@ -101,13 +100,19 @@
             const res = await fetch(SCRIPT_URL);
             const json = await res.json();
             
-            dataIuran = json.map(item => ({
-                Nama: item.Nama || item.nama || "-",
-                Bulan: String(item.Bulan || item.bulan || ""),
-                Jumlah: Number(String(item.Jumlah || 0).replace(/[^\d]/g, "")),
-                Status: item.Status || item.status || "Belum Lunas",
-                rowNumber: item.rowNumber
-            }));
+            dataIuran = json.map(item => {
+                // Perbaikan: Ambil substring YYYY-MM secara aman tanpa terpengaruh zona waktu
+                let rawBulan = String(item.Bulan || item.bulan || "");
+                let formatBulan = rawBulan.includes("T") ? rawBulan.split("T")[0].substring(0, 7) : rawBulan.substring(0, 7);
+                
+                return {
+                    Nama: item.Nama || item.nama || "-",
+                    Bulan: formatBulan,
+                    Jumlah: Number(String(item.Jumlah || 0).replace(/[^\d]/g, "")),
+                    Status: item.Status || item.status || "Belum Lunas",
+                    rowNumber: item.rowNumber
+                };
+            });
             
             renderTable();
         } catch (e) { alert("Gagal mengambil data."); }
@@ -122,21 +127,13 @@
         let lunasRp = 0, belumRp = 0, orangBelum = 0;
 
         dataIuran.forEach(item => {
-            // PERBAIKAN DI SINI: Kita potong format "2026-04-30T..." menjadi "2026-04"
-            const shortBulan = item.Bulan.substring(0, 7); 
-            
-            // Cek jika bulan data sama dengan bulan sekarang (2026-05)
-            if (shortBulan === currentYearMonth) {
+            if (item.Bulan === currentYearMonth) {
                 if (item.Status === "Lunas") lunasRp += item.Jumlah;
                 else belumRp += item.Jumlah;
             }
-            
             if (item.Status === "Belum Lunas") {
                 orangBelum++;
             }
-
-            // Tampilan tabel (kita tampilkan versi pendek saja agar rapi)
-            item.BulanTampil = shortBulan;
         });
 
         document.getElementById("sumLunas").innerText = "Rp " + lunasRp.toLocaleString('id-ID');
@@ -150,7 +147,7 @@
             const row = table.insertRow();
             row.innerHTML = `
                 <td data-label="Nama">${item.Nama}</td>
-                <td data-label="Bulan">${item.BulanTampil}</td>
+                <td data-label="Bulan">${item.Bulan}</td>
                 <td data-label="Jumlah">Rp ${item.Jumlah.toLocaleString('id-ID')}</td>
                 <td data-label="Status"><span class="badge ${item.Status === 'Lunas' ? 'bg-lunas' : 'bg-belum'}">${item.Status}</span></td>
                 ${isAdmin ? `<td><button class="btn-delete" onclick="deleteRow(${item.rowNumber})">HAPUS</button></td>` : ""}
@@ -161,12 +158,19 @@
     async function addRow() {
         const nama = document.getElementById('nama').value;
         const jumlah = document.getElementById('jumlahDisplay').value.replace(/\./g, '');
-        const bulan = document.getElementById('bulan').value;
+        const bulanInput = document.getElementById('bulan').value;
         const status = document.getElementById('statusAwal').value;
-        if (!nama || !jumlah) return alert("Lengkapi data!");
+        if (!nama || !jumlah || !bulanInput) return alert("Lengkapi data!");
+
+        // Perbaikan: Paksa format tanggal ke hari pertama agar tidak meleset ke bulan sebelumnya
+        const tanggalPasti = bulanInput + "-01";
 
         document.getElementById('loader').style.display = 'block';
-        await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ nama, jumlah, bulan, status }) });
+        await fetch(SCRIPT_URL, { 
+            method: 'POST', 
+            mode: 'no-cors', 
+            body: JSON.stringify({ nama, jumlah, bulan: tanggalPasti, status }) 
+        });
         setTimeout(() => location.reload(), 1000);
     }
 
@@ -204,13 +208,13 @@
         table.innerHTML = dataNunggak.length ? "" : "<tr><td colspan='5' style='text-align:center'>Lunas Semua!</td></tr>";
         dataNunggak.forEach(item => {
             const row = table.insertRow();
-            row.innerHTML = `<td data-label="Nama">${item.Nama}</td><td data-label="Bulan">${item.Bulan.substring(0,7)}</td><td data-label="Jumlah">Rp ${item.Jumlah.toLocaleString('id-ID')}</td><td data-label="Status"><span class="badge bg-belum">${item.Status}</span></td>${isAdmin ? `<td><button class="btn-delete" onclick="deleteRow(${item.rowNumber})">HAPUS</button></td>` : ""}`;
+            row.innerHTML = `<td data-label="Nama">${item.Nama}</td><td data-label="Bulan">${item.Bulan}</td><td data-label="Jumlah">Rp ${item.Jumlah.toLocaleString('id-ID')}</td><td data-label="Status"><span class="badge bg-belum">${item.Status}</span></td>${isAdmin ? `<td><button class="btn-delete" onclick="deleteRow(${item.rowNumber})">HAPUS</button></td>` : ""}`;
         });
     }
 
     function copyReport() {
         let txt = `*LAPORAN KAS DOK*\n`;
-        dataIuran.filter(i => i.Bulan.substring(0,7) === currentYearMonth).forEach(i => {
+        dataIuran.filter(i => i.Bulan === currentYearMonth).forEach(i => {
             txt += `${i.Status === 'Lunas' ? '✅' : '❌'} ${i.Nama} - Rp ${i.Jumlah.toLocaleString('id-ID')}\n`;
         });
         navigator.clipboard.writeText(txt).then(() => alert("Disalin!"));
